@@ -1,5 +1,9 @@
 """Main entry point for perpetual arbitrage signal generator"""
 
+# Load environment variables from .env
+from dotenv import load_dotenv
+load_dotenv()
+
 # Apply compatibility shim before importing adapters
 import compat  # noqa: F401
 
@@ -23,6 +27,8 @@ from adapters import (
     PacificaAdapter,
     StandxAdapter,
 )
+from notifiers import send_telegram_signal
+from storage import init_db, save_signal
 
 
 def create_adapters() -> List[BaseExchangeAdapter]:
@@ -50,73 +56,42 @@ async def print_signal(signal: Signal) -> None:
     print(f"{'='*60}\n")
 
 
-async def monitor_loop(state_engine, cost_engine, config, interval: int = 5):
-    """Log market state every N seconds"""
-    from decimal import Decimal
+async def handle_signal(signal: Signal) -> None:
+    """Handle signal: print, save to DB, notify via Telegram"""
+    await print_signal(signal)
+    await save_signal(signal)
+    await send_telegram_signal(signal)
+
+
+async def monitor_loop(state_engine, cost_engine, config, interval: int = 10):
+    """Log BTC state across all exchanges every N seconds"""
+    all_exchanges = ["hyperliquid", "paradex", "backpack", "nado", "extended", "pacifica", "standx"]
 
     while True:
         await asyncio.sleep(interval)
 
         print(f"\n{'='*70}")
-        print(f"MONITOR @ {time.strftime('%H:%M:%S')}")
+        print(f"BTC STATE @ {time.strftime('%H:%M:%S')}")
         print(f"{'='*70}")
 
-        # Get all symbols with quotes
-        all_symbols = list(state_engine._quotes.keys())
-        if not all_symbols:
-            print("  No quotes yet...")
+        quotes = state_engine.get_all_quotes("BTC")
+        connected = set(quotes.keys()) if quotes else set()
+        missing = [ex for ex in all_exchanges if ex not in connected]
+
+        if missing:
+            print(f"  Missing: {', '.join(missing)}")
+
+        if not quotes:
+            print("  No BTC quotes yet...")
             continue
 
-        opportunities = []
-
-        for symbol in sorted(all_symbols):
-            quotes = state_engine.get_all_quotes(symbol)
-            if len(quotes) < 2:
-                continue
-
-            # Find best bid (sell) and best ask (buy)
-            best_sell = None  # (exchange, score, price)
-            best_buy = None
-
-            for exchange, quote in quotes.items():
-                sell_score = cost_engine.compute_sell_score(quote.bid_px, exchange, symbol)
-                buy_score = cost_engine.compute_buy_score(quote.ask_px, exchange, symbol)
-
-                if best_sell is None or sell_score > best_sell[1]:
-                    best_sell = (exchange, sell_score, quote.bid_px)
-                if best_buy is None or buy_score < best_buy[1]:
-                    best_buy = (exchange, buy_score, quote.ask_px)
-
-            if best_sell and best_buy and best_sell[0] != best_buy[0]:
-                edge = best_sell[1] - best_buy[1]
-                mid = (best_sell[2] + best_buy[2]) / 2
-                edge_bps = (edge / mid) * Decimal("10000") if mid > 0 else Decimal("0")
-
-                opportunities.append({
-                    'symbol': symbol,
-                    'sell_ex': best_sell[0],
-                    'sell_px': best_sell[2],
-                    'buy_ex': best_buy[0],
-                    'buy_px': best_buy[2],
-                    'edge_bps': edge_bps,
-                    'num_exchanges': len(quotes),
-                })
-
-        # Sort by edge
-        opportunities.sort(key=lambda x: x['edge_bps'], reverse=True)
-
-        # Print top opportunities
-        print(f"  Symbols with quotes: {len(all_symbols)} | With 2+ exchanges: {len(opportunities)}")
-        print(f"\n  Top opportunities:")
-        print(f"  {'Symbol':<8} {'Sell':<12} {'Buy':<12} {'Edge':>10} {'Exch':>5}")
+        print(f"  {'Exchange':<14} {'Bid':>12} {'Ask':>12} {'Spread':>10}")
         print(f"  {'-'*50}")
 
-        for opp in opportunities[:10]:
-            edge_str = f"{opp['edge_bps']:.2f} bps"
-            print(f"  {opp['symbol']:<8} {opp['sell_ex']:<12} {opp['buy_ex']:<12} {edge_str:>10} {opp['num_exchanges']:>5}")
-
-        if not opportunities:
-            print("  No opportunities yet...")
+        for exchange in sorted(quotes.keys()):
+            quote = quotes[exchange]
+            spread = quote.ask_px - quote.bid_px
+            print(f"  {exchange:<14} {quote.bid_px:>12} {quote.ask_px:>12} {spread:>10}")
         print()
 
 
@@ -171,13 +146,14 @@ async def main():
 
     # 4. Initialize engines
     print("\n[3] Initializing engines...")
+    await init_db()
     state_engine = StateEngine(max_quote_age_ms=config.max_quote_age_ms)
     cost_engine = CostEngine(fees)
     arb_engine = ArbitrageEngine(
         config=config,
         state_engine=state_engine,
         cost_engine=cost_engine,
-        on_signal=print_signal,
+        on_signal=handle_signal,
     )
 
     # 5. Create update handler

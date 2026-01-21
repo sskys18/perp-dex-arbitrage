@@ -35,3 +35,12 @@ secrets.py
 
 # Claude
 .claude/
+
+# Database
+signals.db
+
+# Terraform
+terraform.tfvars
+*.tfstate
+*.tfstate.*
+.terraform/

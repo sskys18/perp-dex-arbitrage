@@ -18,3 +18,8 @@ base58>=2.1
 # Crypto
 pycryptodome>=3.19
 pynacl>=1.5
+
+# Notifications & Storage
+python-telegram-bot>=21.0
+aiosqlite>=0.19.0
+python-dotenv>=1.0
