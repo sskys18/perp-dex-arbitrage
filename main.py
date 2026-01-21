@@ -5,6 +5,7 @@ import compat  # noqa: F401
 
 import asyncio
 import sys
+import time
 from collections import Counter
 from decimal import Decimal
 from typing import List
@@ -47,6 +48,76 @@ async def print_signal(signal: Signal) -> None:
     print(f"  QTY: {signal.qty}")
     print(f"  EDGE: {signal.edge_absolute:.4f} USD ({signal.edge_bps:.2f} bps)")
     print(f"{'='*60}\n")
+
+
+async def monitor_loop(state_engine, cost_engine, config, interval: int = 5):
+    """Log market state every N seconds"""
+    from decimal import Decimal
+
+    while True:
+        await asyncio.sleep(interval)
+
+        print(f"\n{'='*70}")
+        print(f"MONITOR @ {time.strftime('%H:%M:%S')}")
+        print(f"{'='*70}")
+
+        # Get all symbols with quotes
+        all_symbols = list(state_engine._quotes.keys())
+        if not all_symbols:
+            print("  No quotes yet...")
+            continue
+
+        opportunities = []
+
+        for symbol in sorted(all_symbols):
+            quotes = state_engine.get_all_quotes(symbol)
+            if len(quotes) < 2:
+                continue
+
+            # Find best bid (sell) and best ask (buy)
+            best_sell = None  # (exchange, score, price)
+            best_buy = None
+
+            for exchange, quote in quotes.items():
+                sell_score = cost_engine.compute_sell_score(quote.bid_px, exchange, symbol)
+                buy_score = cost_engine.compute_buy_score(quote.ask_px, exchange, symbol)
+
+                if best_sell is None or sell_score > best_sell[1]:
+                    best_sell = (exchange, sell_score, quote.bid_px)
+                if best_buy is None or buy_score < best_buy[1]:
+                    best_buy = (exchange, buy_score, quote.ask_px)
+
+            if best_sell and best_buy and best_sell[0] != best_buy[0]:
+                edge = best_sell[1] - best_buy[1]
+                mid = (best_sell[2] + best_buy[2]) / 2
+                edge_bps = (edge / mid) * Decimal("10000") if mid > 0 else Decimal("0")
+
+                opportunities.append({
+                    'symbol': symbol,
+                    'sell_ex': best_sell[0],
+                    'sell_px': best_sell[2],
+                    'buy_ex': best_buy[0],
+                    'buy_px': best_buy[2],
+                    'edge_bps': edge_bps,
+                    'num_exchanges': len(quotes),
+                })
+
+        # Sort by edge
+        opportunities.sort(key=lambda x: x['edge_bps'], reverse=True)
+
+        # Print top opportunities
+        print(f"  Symbols with quotes: {len(all_symbols)} | With 2+ exchanges: {len(opportunities)}")
+        print(f"\n  Top opportunities:")
+        print(f"  {'Symbol':<8} {'Sell':<12} {'Buy':<12} {'Edge':>10} {'Exch':>5}")
+        print(f"  {'-'*50}")
+
+        for opp in opportunities[:10]:
+            edge_str = f"{opp['edge_bps']:.2f} bps"
+            print(f"  {opp['symbol']:<8} {opp['sell_ex']:<12} {opp['buy_ex']:<12} {edge_str:>10} {opp['num_exchanges']:>5}")
+
+        if not opportunities:
+            print("  No opportunities yet...")
+        print()
 
 
 async def main():
@@ -129,6 +200,12 @@ async def main():
     if not tasks:
         print("\nNo subscriptions created. Exiting.")
         return
+
+    # 7. Start monitor loop
+    monitor_task = asyncio.create_task(
+        monitor_loop(state_engine, cost_engine, config, interval=5)
+    )
+    tasks.append(monitor_task)
 
     print("\n[5] Running... Press Ctrl+C to stop\n")
 
