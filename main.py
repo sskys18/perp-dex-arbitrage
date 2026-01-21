@@ -17,7 +17,6 @@ from adapters import (
     HyperliquidAdapter,
     ParadexAdapter,
     BackpackAdapter,
-    GrvtAdapter,
     NadoAdapter,
     ExtendedAdapter,
     PacificaAdapter,
@@ -27,7 +26,6 @@ from adapters import (
 
 def create_adapters() -> List[BaseExchangeAdapter]:
     """Create all exchange adapters"""
-    # Note: GrvtAdapter skipped - requires authentication for public endpoints
     return [
         HyperliquidAdapter(),
         ParadexAdapter(),

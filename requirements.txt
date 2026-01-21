@@ -1,10 +1,13 @@
+# Exchange Adapters
+exchange-adapters @ git+https://github.com/sskys18/exchange-adapter.git
+
 # Core
 pydantic>=2.0
 httpx>=0.25
 websockets>=12.0
 
 # Ethereum
-eth-account>=0.10
+eth-account>=0.10,<0.12
 eth-abi>=4.0
 eth-typing>=3.0
 

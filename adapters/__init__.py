@@ -4,7 +4,6 @@ from .base import BaseExchangeAdapter
 from .hyperliquid import HyperliquidAdapter
 from .paradex import ParadexAdapter
 from .backpack import BackpackAdapter
-from .grvt import GrvtAdapter
 from .nado import NadoAdapter
 from .extended import ExtendedAdapter
 from .pacifica import PacificaAdapter
@@ -15,7 +14,6 @@ __all__ = [
     "HyperliquidAdapter",
     "ParadexAdapter",
     "BackpackAdapter",
-    "GrvtAdapter",
     "NadoAdapter",
     "ExtendedAdapter",
     "PacificaAdapter",

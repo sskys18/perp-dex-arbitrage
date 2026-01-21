@@ -12,13 +12,27 @@ from models import SymbolInfo, FundingRate, FeeRates, MarketUpdate, PriceLevel
 from .base import BaseExchangeAdapter
 
 
-# Product ID to symbol mapping for Nado
+# Product ID to symbol mapping for Nado (perp products have even IDs)
 NADO_PRODUCT_MAP = {
-    1: "BTC",
-    2: "ETH",
-    3: "SOL",
-    4: "ARB",
-    5: "OP",
+    2: "BTC",
+    4: "ETH",
+    8: "SOL",
+    10: "XRP",
+    14: "BNB",
+    16: "LINK",
+    18: "BCH",
+    20: "DOGE",
+    22: "XLM",
+    24: "NEAR",
+    26: "LTC",
+    28: "TON",
+    30: "SHIB",
+    32: "APT",
+    34: "SUI",
+    36: "ARB",
+    38: "PEPE",
+    40: "BONK",
+    42: "WIF",
 }
 NADO_SYMBOL_TO_PRODUCT = {v: k for k, v in NADO_PRODUCT_MAP.items()}
 
@@ -89,33 +103,28 @@ class NadoAdapter(BaseExchangeAdapter):
 
     async def get_funding_rate(self, symbol: str) -> FundingRate:
         """Get current funding rate for a symbol"""
-        product_id = self._product_id_map.get(symbol)
-        if not product_id:
-            raise ValueError(f"Symbol {symbol} not found")
+        if not self._products_cache:
+            await self.list_symbols()
 
-        # Fetch perp prices directly from API
-        response = await self.http.get("/query", params={"type": "perp_prices", "product_id": product_id})
-        data = response.get("data", {})
+        product = self._products_cache.get(symbol)
+        if not product:
+            raise ValueError(f"Symbol {symbol} not found")
 
         # Nado uses x18 format (divide by 10^18)
         scale = Decimal("1000000000000000000")
 
-        mark_price_x18 = data.get("mark_price_x18", "0")
-        index_price_x18 = data.get("index_price_x18", "0")
+        # Get oracle price and funding from cached product data
+        oracle_price_x18 = product.get("oracle_price_x18", "0")
+        state = product.get("state", {})
 
-        # Funding rate from product state
-        funding_rate = Decimal("0")
-        if self._products_cache.get(symbol):
-            product = self._products_cache[symbol]
-            state = product.get("state", {}) if isinstance(product, dict) else {}
-            if state:
-                funding_rate = Decimal(str(state.get("funding_rate_x18", "0"))) / scale
+        # Funding rate derived from cumulative funding
+        cumulative_funding = Decimal(str(state.get("cumulative_funding_long_x18", "0")))
 
         return FundingRate(
             symbol=symbol,
-            funding_rate=funding_rate,
-            mark_price=Decimal(str(mark_price_x18)) / scale,
-            index_price=Decimal(str(index_price_x18)) / scale,
+            funding_rate=cumulative_funding / scale / Decimal("1000000"),  # Normalize
+            mark_price=Decimal(str(oracle_price_x18)) / scale,
+            index_price=Decimal(str(oracle_price_x18)) / scale,
             timestamp=int(time.time() * 1000),
         )
 
