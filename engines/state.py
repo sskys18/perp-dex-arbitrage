@@ -19,9 +19,11 @@ class Quote:
         self.ts_local = ts_local
         self.ts_exchange = ts_exchange
 
-    def is_valid(self, max_age_ms: int) -> bool:
+    def is_valid(self, max_age_ms: int, now_ms: Optional[int] = None) -> bool:
         """Check if quote is fresh enough"""
-        return (time.time() * 1000 - self.ts_local) < max_age_ms
+        if now_ms is None:
+            now_ms = int(time.time() * 1000)
+        return (now_ms - self.ts_local) < max_age_ms
 
 
 class StateEngine:
@@ -49,23 +51,25 @@ class StateEngine:
             ts_exchange=update.ts_exchange,
         )
 
-    def get_quote(self, symbol: str, exchange: str) -> Optional[Quote]:
+    def get_quote(self, symbol: str, exchange: str, now_ms: Optional[int] = None) -> Optional[Quote]:
         """Get current quote for symbol on exchange"""
         quotes = self._quotes.get(symbol, {})
         quote = quotes.get(exchange)
-        if quote and quote.is_valid(self.max_quote_age_ms):
+        if quote and quote.is_valid(self.max_quote_age_ms, now_ms=now_ms):
             return quote
         return None
 
-    def get_all_quotes(self, symbol: str) -> Dict[str, Quote]:
+    def get_all_quotes(self, symbol: str, now_ms: Optional[int] = None) -> Dict[str, Quote]:
         """Get all valid quotes for a symbol across exchanges"""
         quotes = self._quotes.get(symbol, {})
+        if now_ms is None:
+            now_ms = int(time.time() * 1000)
         return {
             exchange: quote
             for exchange, quote in quotes.items()
-            if quote.is_valid(self.max_quote_age_ms)
+            if quote.is_valid(self.max_quote_age_ms, now_ms=now_ms)
         }
 
-    def get_exchanges_for_symbol(self, symbol: str) -> list:
+    def get_exchanges_for_symbol(self, symbol: str, now_ms: Optional[int] = None) -> list:
         """Get list of exchanges with valid quotes for a symbol"""
-        return list(self.get_all_quotes(symbol).keys())
+        return list(self.get_all_quotes(symbol, now_ms=now_ms).keys())

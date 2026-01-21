@@ -23,3 +23,6 @@ pynacl>=1.5
 python-telegram-bot>=21.0
 aiosqlite>=0.19.0
 python-dotenv>=1.0
+
+# Performance
+uvloop>=0.19.0

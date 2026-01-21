@@ -7,6 +7,13 @@ load_dotenv()
 # Apply compatibility shim before importing adapters
 import compat  # noqa: F401
 
+# Use uvloop for faster event loop (2-4x faster than default asyncio)
+try:
+    import uvloop
+    uvloop.install()
+except ImportError:
+    pass
+
 import asyncio
 import sys
 import time
@@ -59,8 +66,15 @@ async def print_signal(signal: Signal) -> None:
 async def handle_signal(signal: Signal) -> None:
     """Handle signal: print, save to DB, notify via Telegram"""
     await print_signal(signal)
-    await save_signal(signal)
-    await send_telegram_signal(signal)
+    try:
+        await save_signal(signal)
+    except Exception as e:
+        print(f"  [DB Error] {e}")
+    try:
+        await send_telegram_signal(signal)
+    except Exception as e:
+        # Suppress Telegram rate limit errors (fire-and-forget pattern)
+        pass
 
 
 async def monitor_loop(state_engine, cost_engine, config, interval: int = 10):
@@ -159,7 +173,7 @@ async def main():
     # 5. Create update handler
     async def on_update(update: MarketUpdate) -> None:
         state_engine.update(update)
-        await arb_engine.evaluate(update.symbol)
+        await arb_engine.evaluate(update.symbol, exchange=update.exchange)
 
     # 6. Subscribe to market data
     print("\n[4] Subscribing to market data...")
