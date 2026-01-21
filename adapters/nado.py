@@ -152,14 +152,12 @@ class NadoAdapter(BaseExchangeAdapter):
             if msg_type != "best_bid_offer":
                 return
 
-            stream = data.get("stream", {})
-            product_id = stream.get("product_id")
+            product_id = data.get("product_id")
             if not product_id or str(product_id) not in self._reverse_map:
                 return
 
-            bbo_data = data.get("data", {})
-            bid_price = bbo_data.get("bid_price_x18")
-            ask_price = bbo_data.get("ask_price_x18")
+            bid_price = data.get("bid_price")
+            ask_price = data.get("ask_price")
             if not bid_price or not ask_price:
                 return
 
@@ -167,10 +165,10 @@ class NadoAdapter(BaseExchangeAdapter):
                 exchange=self.name,
                 symbol=self._reverse_map[str(product_id)],
                 bid_px=Decimal(str(bid_price)) / scale,
-                bid_sz=Decimal(str(bbo_data.get("bid_qty_x18", "0"))) / scale,
+                bid_sz=Decimal(str(data.get("bid_qty", "0"))) / scale,
                 ask_px=Decimal(str(ask_price)) / scale,
-                ask_sz=Decimal(str(bbo_data.get("ask_qty_x18", "0"))) / scale,
-                ts_exchange=bbo_data.get("timestamp"),
+                ask_sz=Decimal(str(data.get("ask_qty", "0"))) / scale,
+                ts_exchange=data.get("timestamp"),
                 ts_local=int(time.time() * 1000),
             )
             await self._on_update(update)

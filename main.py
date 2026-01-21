@@ -164,13 +164,18 @@ async def main():
     # 6. Subscribe to market data
     print("\n[4] Subscribing to market data...")
     tasks = []
+
+    async def safe_subscribe(adapter, symbols):
+        try:
+            await adapter.subscribe_market_data(symbols, on_update)
+        except Exception as e:
+            print(f"  ERROR {adapter.name}: {e}")
+
     for adapter in adapters:
         adapter_symbols = [s for s in tradeable if s in exchange_symbols.get(adapter.name, set())]
         if adapter_symbols:
             print(f"  {adapter.name}: subscribing to {len(adapter_symbols)} symbols")
-            task = asyncio.create_task(
-                adapter.subscribe_market_data(adapter_symbols, on_update)
-            )
+            task = asyncio.create_task(safe_subscribe(adapter, adapter_symbols))
             tasks.append(task)
 
     if not tasks:

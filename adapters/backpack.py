@@ -114,8 +114,8 @@ class BackpackAdapter(BaseExchangeAdapter):
                 return
 
             book_data = data.get("data", {})
-            bids = book_data.get("bids", [])
-            asks = book_data.get("asks", [])
+            bids = book_data.get("b", [])
+            asks = book_data.get("a", [])
             if not bids or not asks:
                 return
 
