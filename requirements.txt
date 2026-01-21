@@ -3,8 +3,8 @@ pydantic>=2.0
 httpx>=0.25
 websockets>=12.0
 
-# Exchange adapters (private)
-exchange-adapters @ git+https://github.com/sskys18/exchange-adapter.git
+# Exchange adapters (private) - with all optional deps
+exchange-adapters[all] @ git+https://github.com/sskys18/exchange-adapter.git
 
 # Ethereum
 eth-account>=0.10,<0.12
