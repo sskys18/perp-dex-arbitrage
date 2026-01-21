@@ -19,6 +19,8 @@ provider "aws" {
   region = var.aws_region
 }
 
+data "aws_caller_identity" "current" {}
+
 resource "tls_private_key" "arbitrage" {
   algorithm = "RSA"
   rsa_bits  = 4096
@@ -88,6 +90,17 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+resource "aws_iam_role_policy_attachment" "ecr" {
+  role       = aws_iam_role.arbitrage.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_ecr_repository" "arbitrage" {
+  name                 = "perp-dex-arbitrage"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+}
+
 resource "aws_iam_instance_profile" "arbitrage" {
   name = "perp-dex-arbitrage"
   role = aws_iam_role.arbitrage.name
@@ -103,6 +116,8 @@ resource "aws_instance" "arbitrage" {
   user_data = templatefile("${path.module}/user_data.sh", {
     telegram_bot_token = var.telegram_bot_token
     telegram_chat_id   = var.telegram_chat_id
+    region             = var.aws_region
+    account_id         = data.aws_caller_identity.current.account_id
   })
 
   tags = {
