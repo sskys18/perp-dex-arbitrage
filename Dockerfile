@@ -2,7 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install uv
+# Install git (needed for git-based dependencies) and uv
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 RUN pip install uv
 
 # Copy requirements first for caching
