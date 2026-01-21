@@ -27,7 +27,7 @@ from adapters import (
     PacificaAdapter,
     StandxAdapter,
 )
-from notifiers import send_telegram_signal
+from notifiers import send_telegram_init, send_telegram_signal
 from storage import init_db, save_signal
 
 
@@ -177,13 +177,18 @@ async def main():
         print("\nNo subscriptions created. Exiting.")
         return
 
-    # 7. Start monitor loop
+    # 7. Send init notification
+    print("\n[5] Sending init notification...")
+    active_exchanges = [a.name for a in adapters if exchange_symbols.get(a.name)]
+    await send_telegram_init(active_exchanges, tradeable)
+
+    # 8. Start monitor loop
     monitor_task = asyncio.create_task(
         monitor_loop(state_engine, cost_engine, config, interval=5)
     )
     tasks.append(monitor_task)
 
-    print("\n[5] Running... Press Ctrl+C to stop\n")
+    print("\n[6] Running... Press Ctrl+C to stop\n")
 
     try:
         await asyncio.gather(*tasks)

@@ -2,10 +2,11 @@
 set -e
 
 # Install Docker
-dnf install -y docker
+apt-get update
+apt-get install -y docker.io awscli
 systemctl enable docker
 systemctl start docker
-usermod -aG docker ec2-user
+usermod -aG docker ubuntu
 
 # Write environment file
 cat > /opt/arbitrage.env << 'EOF'
@@ -33,22 +34,3 @@ docker rm arbitrage 2>/dev/null || true
 docker run -d --name arbitrage --restart always --env-file /opt/arbitrage.env -v /data:/data $ECR_URL:latest
 SCRIPT
 chmod +x /opt/deploy.sh
-
-# Create systemd service for auto-restart
-cat > /etc/systemd/system/arbitrage-deploy.service << 'EOF'
-[Unit]
-Description=Deploy Arbitrage Container
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/opt/deploy.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable arbitrage-deploy

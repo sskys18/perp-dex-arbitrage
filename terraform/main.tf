@@ -37,13 +37,13 @@ resource "local_file" "private_key" {
   file_permission = "0400"
 }
 
-data "aws_ami" "amazon_linux" {
+data "aws_ami" "ubuntu" {
   most_recent = true
-  owners      = ["amazon"]
+  owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
   }
 }
 
@@ -107,7 +107,7 @@ resource "aws_iam_instance_profile" "arbitrage" {
 }
 
 resource "aws_instance" "arbitrage" {
-  ami                    = data.aws_ami.amazon_linux.id
+  ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
   key_name               = aws_key_pair.arbitrage.key_name
   iam_instance_profile   = aws_iam_instance_profile.arbitrage.name
