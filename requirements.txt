@@ -1,0 +1,17 @@
+# Core
+pydantic>=2.0
+httpx>=0.25
+websockets>=12.0
+
+# Ethereum
+eth-account>=0.10
+eth-abi>=4.0
+eth-typing>=3.0
+
+# Solana
+solders>=0.20
+base58>=2.1
+
+# Crypto
+pycryptodome>=3.19
+pynacl>=1.5
