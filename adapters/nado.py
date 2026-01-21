@@ -46,25 +46,26 @@ class NadoAdapter(BaseExchangeAdapter):
 
     def __init__(self):
         super().__init__()
-        self.http = HttpClient(base_url="https://gateway.prod.nado.xyz", signer=None)
+        self.http = HttpClient(base_url="https://gateway.prod.nado.xyz/v2", signer=None)
         self.rest = NadoPerpRestClient(http=self.http, signer=None)
         self.ws: Optional[NadoPerpWsClient] = None
         self._on_update: Optional[Callable[[MarketUpdate], Awaitable[None]]] = None
-        self._products_cache: dict = {}
+        self._assets_cache: dict = {}
         self._product_id_map: dict = {}  # normalized -> product_id
 
     async def list_symbols(self) -> List[str]:
-        """Fetch all available perp symbols"""
-        # Fetch raw API response (has {status, data, request_type} wrapper)
-        response = await self.http.get("/query", params={"type": "all_products"})
-        data = response.get("data", {})
-        perp_products = data.get("perp_products", [])
+        """Fetch all available perp symbols from /assets endpoint"""
+        response = await self.http.get("/assets")
+        assets = response if isinstance(response, list) else response.get("data", [])
 
         symbols = []
-        for product in perp_products:
-            product_id = product.get("product_id")
-            # Build mapping dynamically from API
-            symbol_name = product.get("symbol", "")
+        for asset in assets:
+            # Only include perp markets
+            if asset.get("market_type") != "perp":
+                continue
+
+            product_id = asset.get("product_id")
+            symbol_name = asset.get("symbol", "")  # e.g. "BTC-PERP"
             if symbol_name:
                 normalized = symbol_name.replace("-PERP", "").replace("_PERP", "")
             elif product_id in NADO_PRODUCT_MAP:
@@ -75,24 +76,23 @@ class NadoAdapter(BaseExchangeAdapter):
             self._symbol_map[normalized] = str(product_id)
             self._reverse_map[str(product_id)] = normalized
             self._product_id_map[normalized] = product_id
-            self._products_cache[normalized] = product
+            self._assets_cache[normalized] = asset
             symbols.append(normalized)
         return symbols
 
     async def get_symbol_info(self, symbol: Optional[str] = None) -> List[SymbolInfo]:
         """Get detailed symbol information"""
-        if not self._products_cache:
+        if not self._assets_cache:
             await self.list_symbols()
 
         results = []
-        for normalized, product in self._products_cache.items():
+        for normalized, asset in self._assets_cache.items():
             if symbol and normalized != symbol:
                 continue
-            # Product is now a dict from raw API
-            product_id = product.get("product_id", 0) if isinstance(product, dict) else getattr(product, 'product_id', 0)
+            product_id = asset.get("product_id", 0)
             results.append(SymbolInfo(
                 symbol=normalized,
-                exchange_symbol=str(product_id),
+                exchange_symbol=asset.get("ticker_id", str(product_id)),
                 base_asset=normalized,
                 quote_asset="USDT",
                 price_decimals=6,
@@ -103,33 +103,34 @@ class NadoAdapter(BaseExchangeAdapter):
 
     async def get_funding_rate(self, symbol: str) -> FundingRate:
         """Get current funding rate for a symbol"""
-        if not self._products_cache:
+        if not self._assets_cache:
             await self.list_symbols()
 
-        product = self._products_cache.get(symbol)
-        if not product:
+        asset = self._assets_cache.get(symbol)
+        if not asset:
             raise ValueError(f"Symbol {symbol} not found")
 
-        # Nado uses x18 format (divide by 10^18)
-        scale = Decimal("1000000000000000000")
-
-        # Get oracle price and funding from cached product data
-        oracle_price_x18 = product.get("oracle_price_x18", "0")
-        state = product.get("state", {})
-
-        # Funding rate derived from cumulative funding
-        cumulative_funding = Decimal(str(state.get("cumulative_funding_long_x18", "0")))
-
+        # Assets endpoint doesn't have funding data, return placeholder
         return FundingRate(
             symbol=symbol,
-            funding_rate=cumulative_funding / scale / Decimal("1000000"),  # Normalize
-            mark_price=Decimal(str(oracle_price_x18)) / scale,
-            index_price=Decimal(str(oracle_price_x18)) / scale,
+            funding_rate=Decimal("0"),
             timestamp=int(time.time() * 1000),
         )
 
     async def get_fee_rates(self) -> FeeRates:
-        """Get fee rates (default, requires subaccount for user-specific)"""
+        """Get fee rates from assets endpoint"""
+        if not self._assets_cache:
+            await self.list_symbols()
+
+        # Use first asset's fees if available
+        for asset in self._assets_cache.values():
+            maker = asset.get("maker_fee")
+            taker = asset.get("taker_fee")
+            if maker is not None or taker is not None:
+                return FeeRates(
+                    maker_fee=Decimal(str(maker)) if maker else self.default_maker_fee,
+                    taker_fee=Decimal(str(taker)) if taker else self.default_taker_fee,
+                )
         return FeeRates(
             maker_fee=self.default_maker_fee,
             taker_fee=self.default_taker_fee,

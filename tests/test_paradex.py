@@ -113,12 +113,14 @@ async def test_websocket():
                     print(f"  Skipping: {exc_sym} not in reverse_map")
                     return
 
-                bid = bbo_data.get("bid")
-                ask = bbo_data.get("ask")
-                print(f"  bid: {bid}")
-                print(f"  ask: {ask}")
+                bid_px = bbo_data.get("bid")
+                bid_sz = bbo_data.get("bid_size")
+                ask_px = bbo_data.get("ask")
+                ask_sz = bbo_data.get("ask_size")
+                print(f"  bid: {bid_px} x {bid_sz}")
+                print(f"  ask: {ask_px} x {ask_sz}")
 
-                if not bid or not ask:
+                if not bid_px or not ask_px:
                     print(f"  Skipping: missing bid or ask")
                     return
 
@@ -126,11 +128,11 @@ async def test_websocket():
                 update = MarketUpdate(
                     exchange=adapter.name,
                     symbol=adapter._reverse_map[exc_sym],
-                    bid_px=Decimal(str(bid.get("price", "0"))),
-                    bid_sz=Decimal(str(bid.get("size", "0"))),
-                    ask_px=Decimal(str(ask.get("price", "0"))),
-                    ask_sz=Decimal(str(ask.get("size", "0"))),
-                    ts_exchange=bbo_data.get("timestamp"),
+                    bid_px=Decimal(str(bid_px)),
+                    bid_sz=Decimal(str(bid_sz or "0")),
+                    ask_px=Decimal(str(ask_px)),
+                    ask_sz=Decimal(str(ask_sz or "0")),
+                    ts_exchange=bbo_data.get("last_updated_at"),
                     ts_local=0,
                 )
                 await callback(update)
@@ -149,17 +151,19 @@ async def test_websocket():
             await on_connect()
             await connect_task
 
-        print("\nStarting websocket (1s)...")
+        print("\nStarting websocket (10s)...")
         task = asyncio.create_task(patched_subscribe(test_symbols, on_update))
-        await asyncio.sleep(1)
+        await asyncio.sleep(10)
         task.cancel()
 
         print(f"\n[websocket] Received {len(messages_received)} updates")
+        assert len(messages_received) > 0, "No websocket data received"
 
     except Exception as e:
         print(f"Error: {e}")
         import traceback
         traceback.print_exc()
+        raise
     finally:
         await adapter.close()
 

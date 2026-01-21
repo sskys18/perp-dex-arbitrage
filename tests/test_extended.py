@@ -95,75 +95,62 @@ async def test_websocket():
                 if not isinstance(data, dict):
                     return
 
-                channel = data.get("channel", "")
-                print(f"  channel: {channel}")
+                # Extended uses nested data with b/a for bids/asks
+                inner = data.get("data", {})
+                bids = inner.get("b", [])
+                asks = inner.get("a", [])
+                print(f"  bids: {bids[:2] if bids else []}")
+                print(f"  asks: {asks[:2] if asks else []}")
 
-                if not channel.startswith("bbo:"):
-                    print(f"  Skipping: not bbo channel")
+                if not bids or not asks:
+                    print(f"  Skipping: missing bids or asks")
                     return
 
-                exc_sym = channel.replace("bbo:", "")
-                print(f"  exc_sym: {exc_sym}")
-                print(f"  reverse_map keys sample: {list(adapter._reverse_map.keys())[:5]}")
-
-                if exc_sym not in adapter._reverse_map:
-                    print(f"  Skipping: {exc_sym} not in reverse_map")
-                    return
-
-                bbo_data = data.get("data", {})
-                bid = bbo_data.get("bid", {})
-                ask = bbo_data.get("ask", {})
-                print(f"  bid: {bid}")
-                print(f"  ask: {ask}")
-
-                if not bid or not ask:
-                    print(f"  Skipping: missing bid or ask")
-                    return
-
-                from models import MarketUpdate
-                update = MarketUpdate(
-                    exchange=adapter.name,
-                    symbol=adapter._reverse_map[exc_sym],
-                    bid_px=Decimal(str(bid.get("price", "0"))),
-                    bid_sz=Decimal(str(bid.get("size", "0"))),
-                    ask_px=Decimal(str(ask.get("price", "0"))),
-                    ask_sz=Decimal(str(ask.get("size", "0"))),
-                    ts_exchange=bbo_data.get("timestamp"),
-                    ts_local=0,
-                )
-                await callback(update)
+                try:
+                    from models import MarketUpdate
+                    # Format: {'p': '89713', 'q': '1.33419'}
+                    update = MarketUpdate(
+                        exchange=adapter.name,
+                        symbol="BTC",  # URL-based, single symbol
+                        bid_px=Decimal(str(bids[0]["p"])),
+                        bid_sz=Decimal(str(bids[0]["q"])),
+                        ask_px=Decimal(str(asks[0]["p"])),
+                        ask_sz=Decimal(str(asks[0]["q"])),
+                        ts_exchange=data.get("ts"),
+                        ts_local=0,
+                    )
+                    await callback(update)
+                except Exception as e:
+                    print(f"  ERROR creating update: {e}")
 
             from core.ws.client import WsClient
+            from exchanges.extended.perp.constants import WS_URL
+            # Extended uses URL-based streaming - no subscription needed
+            exc_sym = adapter._symbol_map.get("BTC", "BTC-USD")
+            ws_url = f"{WS_URL}/orderbooks/{exc_sym}?depth=1"
+            print(f"  Connecting to: {ws_url}")
             adapter.ws = WsClient(
-                url="wss://api.starknet.extended.exchange/ws/v1",
+                url=ws_url,
                 on_message=handle_message_with_log
             )
 
-            async def on_connect():
-                for sym in syms:
-                    exc_sym = adapter._symbol_map.get(sym, sym)
-                    print(f"  Subscribing to: bbo:{exc_sym}")
-                    await adapter.ws.send({
-                        "type": "subscribe",
-                        "channel": f"bbo:{exc_sym}"
-                    })
-
             connect_task = asyncio.create_task(adapter.ws.connect())
             await asyncio.sleep(1)
-            await on_connect()
             await connect_task
 
-        print("\nStarting websocket (1s)...")
+        print("\nStarting websocket (10s)...")
         task = asyncio.create_task(patched_subscribe(test_symbols, on_update))
-        await asyncio.sleep(1)
+        await asyncio.sleep(10)
         task.cancel()
 
         print(f"\n[websocket] Received {len(messages_received)} updates")
+        assert len(messages_received) > 0, "No websocket data received"
 
     except Exception as e:
         print(f"Error: {e}")
         import traceback
         traceback.print_exc()
+        raise
     finally:
         await adapter.close()
 

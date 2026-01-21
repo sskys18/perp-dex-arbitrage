@@ -6,7 +6,6 @@ from typing import List, Optional, Callable, Awaitable
 
 from core.http.client import HttpClient
 from exchanges.standx.perp.rest_client import StandXRestClient
-from core.ws.client import WsClient
 
 from models import SymbolInfo, FundingRate, FeeRates, MarketUpdate, PriceLevel
 from .base import BaseExchangeAdapter
@@ -74,24 +73,14 @@ class StandxAdapter(BaseExchangeAdapter):
     async def get_funding_rate(self, symbol: str) -> FundingRate:
         """Get current funding rate for a symbol"""
         exc_sym = self._symbol_map.get(symbol, symbol)
-        now = int(time.time())
-        # Query last hour of funding rates
-        funding_rates = await self.rest.query_funding_rates(
-            symbol=exc_sym,
-            start_time=now - 3600,
-            end_time=now
-        )
+        market = await self.rest.query_symbol_market(symbol=exc_sym)
 
-        if not funding_rates:
-            raise ValueError(f"No funding data for {symbol}")
-
-        data = funding_rates[-1]  # Most recent
         return FundingRate(
             symbol=symbol,
-            funding_rate=Decimal(data.funding_rate),
-            mark_price=Decimal(data.mark_price),
-            index_price=Decimal(data.index_price),
-            timestamp=data.time * 1000,  # Convert to ms
+            funding_rate=Decimal(market.funding_rate),
+            mark_price=Decimal(market.mark_price),
+            index_price=Decimal(market.index_price),
+            timestamp=int(time.time() * 1000),
         )
 
     async def get_fee_rates(self) -> FeeRates:
@@ -122,8 +111,8 @@ class StandxAdapter(BaseExchangeAdapter):
             if not isinstance(data, dict):
                 return
 
-            msg_type = data.get("type", "")
-            if msg_type != "depth_book":
+            channel = data.get("channel", "")
+            if channel != "depth_book":
                 return
 
             exc_sym = data.get("symbol", "")
@@ -150,25 +139,20 @@ class StandxAdapter(BaseExchangeAdapter):
             )
             await self._on_update(update)
 
-        self.ws = WsClient(
-            url="wss://perps.standx.com/ws",
-            on_message=handle_message
-        )
+        from exchanges.standx.perp import StandXMarketWsClient
+        self.ws = StandXMarketWsClient(on_message=handle_message)
 
-        async def on_connect():
-            for sym in symbols:
-                exc_sym = self._symbol_map.get(sym, sym)
-                await self.ws.send({
-                    "type": "subscribe",
-                    "channel": "depth_book",
-                    "symbol": exc_sym
-                })
+        async def subscribe_after_connect():
+            await asyncio.sleep(1)  # Wait for connection
+            exc_syms = [self._symbol_map.get(sym, sym) for sym in symbols]
+            await self.ws.subscribe_depth_book(exc_syms)
 
         import asyncio
-        connect_task = asyncio.create_task(self.ws.connect())
-        await asyncio.sleep(1)
-        await on_connect()
-        await connect_task
+        # Run connect and subscription in parallel, don't block
+        await asyncio.gather(
+            self.ws.connect(),
+            subscribe_after_connect()
+        )
 
     async def close(self) -> None:
         """Close all connections"""

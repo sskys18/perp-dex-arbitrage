@@ -6,7 +6,7 @@ from typing import List, Optional, Callable, Awaitable
 
 from core.http.client import HttpClient
 from exchanges.pacifica.perp.rest_client import PacificaPerpRestClient
-from core.ws.client import WsClient
+from exchanges.pacifica.perp import PacificaPerpWsClient
 
 from models import SymbolInfo, FundingRate, FeeRates, MarketUpdate, PriceLevel
 from .base import BaseExchangeAdapter
@@ -23,7 +23,7 @@ class PacificaAdapter(BaseExchangeAdapter):
         super().__init__()
         self.http = HttpClient(base_url="https://api.pacifica.fi/api/v1", signer=None)
         self.rest = PacificaPerpRestClient(http=self.http, signer=None)
-        self.ws: Optional[WsClient] = None
+        self.ws: Optional[PacificaPerpWsClient] = None
         self._on_update: Optional[Callable[[MarketUpdate], Awaitable[None]]] = None
         self._markets_cache: dict = {}
 
@@ -117,43 +117,39 @@ class PacificaAdapter(BaseExchangeAdapter):
                 return
 
             channel = data.get("channel", "")
-            if not channel.startswith("bbo."):
-                return
-
-            exc_sym = channel.replace("bbo.", "")
-            if exc_sym not in self._reverse_map:
+            if channel != "bbo":
                 return
 
             bbo_data = data.get("data", {})
-            bid = bbo_data.get("bid", {})
-            ask = bbo_data.get("ask", {})
-            if not bid or not ask:
+            symbol = bbo_data.get("s", "")
+            if symbol not in self._symbol_map:
+                return
+
+            # Format: s=symbol, b=bid, B=bid_size, a=ask, A=ask_size, t=timestamp
+            bid_px = bbo_data.get("b")
+            bid_sz = bbo_data.get("B")
+            ask_px = bbo_data.get("a")
+            ask_sz = bbo_data.get("A")
+            if not bid_px or not ask_px:
                 return
 
             update = MarketUpdate(
                 exchange=self.name,
-                symbol=self._reverse_map[exc_sym],
-                bid_px=Decimal(str(bid.get("price", "0"))),
-                bid_sz=Decimal(str(bid.get("size", "0"))),
-                ask_px=Decimal(str(ask.get("price", "0"))),
-                ask_sz=Decimal(str(ask.get("size", "0"))),
-                ts_exchange=bbo_data.get("timestamp"),
+                symbol=symbol,
+                bid_px=Decimal(str(bid_px)),
+                bid_sz=Decimal(str(bid_sz or "0")),
+                ask_px=Decimal(str(ask_px)),
+                ask_sz=Decimal(str(ask_sz or "0")),
+                ts_exchange=bbo_data.get("t"),
                 ts_local=int(time.time() * 1000),
             )
             await self._on_update(update)
 
-        self.ws = WsClient(
-            url="wss://api.pacifica.fi/ws",
-            on_message=handle_message
-        )
+        self.ws = PacificaPerpWsClient(on_message=handle_message)
 
         async def on_connect():
             for sym in symbols:
-                exc_sym = self._symbol_map.get(sym, sym)
-                await self.ws.send({
-                    "type": "subscribe",
-                    "channel": f"bbo.{exc_sym}"
-                })
+                await self.ws.subscribe_bbo(sym)
 
         import asyncio
         connect_task = asyncio.create_task(self.ws.connect())

@@ -95,11 +95,11 @@ async def test_websocket():
                 if not isinstance(data, dict):
                     return
 
-                msg_type = data.get("type", "")
-                print(f"  type: {msg_type}")
+                channel = data.get("channel", "")
+                print(f"  channel: {channel}")
 
-                if msg_type != "depth_book":
-                    print(f"  Skipping: not depth_book type")
+                if channel != "depth_book":
+                    print(f"  Skipping: not depth_book channel")
                     return
 
                 exc_sym = data.get("symbol", "")
@@ -133,38 +133,32 @@ async def test_websocket():
                 )
                 await callback(update)
 
-            from core.ws.client import WsClient
-            adapter.ws = WsClient(
-                url="wss://perps.standx.com/ws",
-                on_message=handle_message_with_log
-            )
+            from exchanges.standx.perp import StandXMarketWsClient
+            adapter.ws = StandXMarketWsClient(on_message=handle_message_with_log)
 
             async def on_connect():
-                for sym in syms:
-                    exc_sym = adapter._symbol_map.get(sym, sym)
-                    print(f"  Subscribing to depth_book: {exc_sym}")
-                    await adapter.ws.send({
-                        "type": "subscribe",
-                        "channel": "depth_book",
-                        "symbol": exc_sym
-                    })
+                exc_syms = [adapter._symbol_map.get(sym, sym) for sym in syms]
+                print(f"  Subscribing to depth_book: {exc_syms}")
+                await adapter.ws.subscribe_depth_book(exc_syms)
 
             connect_task = asyncio.create_task(adapter.ws.connect())
             await asyncio.sleep(1)
             await on_connect()
             await connect_task
 
-        print("\nStarting websocket (1s)...")
+        print("\nStarting websocket (10s)...")
         task = asyncio.create_task(patched_subscribe(test_symbols, on_update))
-        await asyncio.sleep(1)
+        await asyncio.sleep(10)
         task.cancel()
 
         print(f"\n[websocket] Received {len(messages_received)} updates")
+        assert len(messages_received) > 0, "No websocket data received"
 
     except Exception as e:
         print(f"Error: {e}")
         import traceback
         traceback.print_exc()
+        raise
     finally:
         await adapter.close()
 

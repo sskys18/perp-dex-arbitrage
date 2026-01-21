@@ -118,19 +118,21 @@ class ParadexAdapter(BaseExchangeAdapter):
             if exc_sym not in self._reverse_map:
                 return
 
-            bid = bbo_data.get("bid")
-            ask = bbo_data.get("ask")
-            if not bid or not ask:
+            bid_px = bbo_data.get("bid")
+            bid_sz = bbo_data.get("bid_size")
+            ask_px = bbo_data.get("ask")
+            ask_sz = bbo_data.get("ask_size")
+            if not bid_px or not ask_px:
                 return
 
             update = MarketUpdate(
                 exchange=self.name,
                 symbol=self._reverse_map[exc_sym],
-                bid_px=Decimal(str(bid.get("price", "0"))),
-                bid_sz=Decimal(str(bid.get("size", "0"))),
-                ask_px=Decimal(str(ask.get("price", "0"))),
-                ask_sz=Decimal(str(ask.get("size", "0"))),
-                ts_exchange=bbo_data.get("timestamp"),
+                bid_px=Decimal(str(bid_px)),
+                bid_sz=Decimal(str(bid_sz or "0")),
+                ask_px=Decimal(str(ask_px)),
+                ask_sz=Decimal(str(ask_sz or "0")),
+                ts_exchange=bbo_data.get("last_updated_at"),
                 ts_local=int(time.time() * 1000),
             )
             await self._on_update(update)

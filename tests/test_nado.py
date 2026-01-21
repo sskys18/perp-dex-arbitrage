@@ -153,17 +153,19 @@ async def test_websocket():
             await on_connect()
             await connect_task
 
-        print("\nStarting websocket (1s)...")
+        print("\nStarting websocket (10s)...")
         task = asyncio.create_task(patched_subscribe(test_symbols, on_update))
-        await asyncio.sleep(1)
+        await asyncio.sleep(10)
         task.cancel()
 
         print(f"\n[websocket] Received {len(messages_received)} updates")
+        assert len(messages_received) > 0, "No websocket data received"
 
     except Exception as e:
         print(f"Error: {e}")
         import traceback
         traceback.print_exc()
+        raise
     finally:
         await adapter.close()
 

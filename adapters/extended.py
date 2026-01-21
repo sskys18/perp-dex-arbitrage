@@ -23,7 +23,7 @@ class ExtendedAdapter(BaseExchangeAdapter):
         super().__init__()
         self.http = HttpClient(base_url="https://api.starknet.extended.exchange/api/v1", signer=None)
         self.rest = ExtendedPerpRestClient(http=self.http, signer=None)
-        self.ws: Optional[WsClient] = None
+        self._ws_clients: list[WsClient] = []  # Multiple WS connections
         self._on_update: Optional[Callable[[MarketUpdate], Awaitable[None]]] = None
         self._markets_cache: dict = {}
 
@@ -103,60 +103,50 @@ class ExtendedAdapter(BaseExchangeAdapter):
         symbols: List[str],
         on_update: Callable[[MarketUpdate], Awaitable[None]]
     ) -> None:
-        """Subscribe to real-time BBO data"""
+        """Subscribe to real-time BBO data via URL-based streaming"""
+        from exchanges.extended.perp.constants import WS_URL
         self._on_update = on_update
 
-        async def handle_message(data):
-            if not isinstance(data, dict):
-                return
+        def make_handler(symbol: str):
+            async def handle_message(data):
+                if not isinstance(data, dict):
+                    return
 
-            channel = data.get("channel", "")
-            if not channel.startswith("bbo:"):
-                return
+                # Extended uses nested data with b/a for bids/asks
+                inner = data.get("data", {})
+                bids = inner.get("b", [])
+                asks = inner.get("a", [])
+                if not bids or not asks:
+                    return
 
-            exc_sym = channel.replace("bbo:", "")
-            if exc_sym not in self._reverse_map:
-                return
+                # Format: {'p': '89713', 'q': '1.33419'}
+                update = MarketUpdate(
+                    exchange=self.name,
+                    symbol=symbol,
+                    bid_px=Decimal(str(bids[0]["p"])),
+                    bid_sz=Decimal(str(bids[0]["q"])),
+                    ask_px=Decimal(str(asks[0]["p"])),
+                    ask_sz=Decimal(str(asks[0]["q"])),
+                    ts_exchange=data.get("ts"),
+                    ts_local=int(time.time() * 1000),
+                )
+                await self._on_update(update)
+            return handle_message
 
-            bbo_data = data.get("data", {})
-            bid = bbo_data.get("bid", {})
-            ask = bbo_data.get("ask", {})
-            if not bid or not ask:
-                return
-
-            update = MarketUpdate(
-                exchange=self.name,
-                symbol=self._reverse_map[exc_sym],
-                bid_px=Decimal(str(bid.get("price", "0"))),
-                bid_sz=Decimal(str(bid.get("size", "0"))),
-                ask_px=Decimal(str(ask.get("price", "0"))),
-                ask_sz=Decimal(str(ask.get("size", "0"))),
-                ts_exchange=bbo_data.get("timestamp"),
-                ts_local=int(time.time() * 1000),
-            )
-            await self._on_update(update)
-
-        self.ws = WsClient(
-            url="wss://api.starknet.extended.exchange/ws/v1",
-            on_message=handle_message
-        )
-
-        async def on_connect():
-            for sym in symbols:
-                exc_sym = self._symbol_map.get(sym, sym)
-                await self.ws.send({
-                    "type": "subscribe",
-                    "channel": f"bbo:{exc_sym}"
-                })
-
+        # Extended uses URL-based streaming - create one WS per symbol
         import asyncio
-        connect_task = asyncio.create_task(self.ws.connect())
-        await asyncio.sleep(1)
-        await on_connect()
-        await connect_task
+        tasks = []
+        for symbol in symbols:
+            exc_sym = self._symbol_map.get(symbol, f"{symbol}-USD")
+            ws_url = f"{WS_URL}/orderbooks/{exc_sym}?depth=1"
+            ws = WsClient(url=ws_url, on_message=make_handler(symbol))
+            self._ws_clients.append(ws)
+            tasks.append(asyncio.create_task(ws.connect()))
+
+        await asyncio.gather(*tasks)
 
     async def close(self) -> None:
         """Close all connections"""
-        if self.ws:
-            await self.ws.close()
+        for ws in self._ws_clients:
+            await ws.close()
         await self.http.close()

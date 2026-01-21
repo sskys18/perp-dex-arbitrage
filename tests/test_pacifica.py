@@ -96,72 +96,70 @@ async def test_websocket():
                 channel = data.get("channel", "")
                 print(f"  channel: {channel}")
 
-                if not channel.startswith("bbo."):
+                if channel != "bbo":
                     print(f"  Skipping: not bbo channel")
                     return
 
-                exc_sym = channel.replace("bbo.", "")
-                print(f"  exc_sym: {exc_sym}")
-                print(f"  reverse_map keys sample: {list(adapter._reverse_map.keys())[:5]}")
+                bbo_data = data.get("data", {})
+                symbol = bbo_data.get("s", "")
+                print(f"  symbol: {symbol}")
+                print(f"  symbol_map keys sample: {list(adapter._symbol_map.keys())[:5]}")
 
-                if exc_sym not in adapter._reverse_map:
-                    print(f"  Skipping: {exc_sym} not in reverse_map")
+                if symbol not in adapter._symbol_map:
+                    print(f"  Skipping: {symbol} not in symbol_map")
                     return
 
-                bbo_data = data.get("data", {})
-                bid = bbo_data.get("bid", {})
-                ask = bbo_data.get("ask", {})
-                print(f"  bid: {bid}")
-                print(f"  ask: {ask}")
+                # Format: s=symbol, b=bid, B=bid_size, a=ask, A=ask_size
+                bid_px = bbo_data.get("b")
+                bid_sz = bbo_data.get("B")
+                ask_px = bbo_data.get("a")
+                ask_sz = bbo_data.get("A")
+                print(f"  bid: {bid_px} x {bid_sz}")
+                print(f"  ask: {ask_px} x {ask_sz}")
 
-                if not bid or not ask:
+                if not bid_px or not ask_px:
                     print(f"  Skipping: missing bid or ask")
                     return
 
                 from models import MarketUpdate
                 update = MarketUpdate(
                     exchange=adapter.name,
-                    symbol=adapter._reverse_map[exc_sym],
-                    bid_px=Decimal(str(bid.get("price", "0"))),
-                    bid_sz=Decimal(str(bid.get("size", "0"))),
-                    ask_px=Decimal(str(ask.get("price", "0"))),
-                    ask_sz=Decimal(str(ask.get("size", "0"))),
-                    ts_exchange=bbo_data.get("timestamp"),
+                    symbol=symbol,  # Already normalized
+                    bid_px=Decimal(str(bid_px)),
+                    bid_sz=Decimal(str(bid_sz or "0")),
+                    ask_px=Decimal(str(ask_px)),
+                    ask_sz=Decimal(str(ask_sz or "0")),
+                    ts_exchange=bbo_data.get("t"),
                     ts_local=0,
                 )
                 await callback(update)
 
-            from core.ws.client import WsClient
-            adapter.ws = WsClient(
-                url="wss://api.pacifica.fi/ws",
-                on_message=handle_message_with_log
-            )
+            from exchanges.pacifica.perp import PacificaPerpWsClient
+            adapter.ws = PacificaPerpWsClient(on_message=handle_message_with_log)
 
             async def on_connect():
                 for sym in syms:
-                    exc_sym = adapter._symbol_map.get(sym, sym)
-                    print(f"  Subscribing to: bbo.{exc_sym}")
-                    await adapter.ws.send({
-                        "type": "subscribe",
-                        "channel": f"bbo.{exc_sym}"
-                    })
+                    print(f"  Subscribing to bbo: {sym}")
+                    await adapter.ws.subscribe_bbo(sym)
 
             connect_task = asyncio.create_task(adapter.ws.connect())
             await asyncio.sleep(1)
             await on_connect()
             await connect_task
 
-        print("\nStarting websocket (1s)...")
+        print("\nStarting websocket (10s)...")
         task = asyncio.create_task(patched_subscribe(test_symbols, on_update))
-        await asyncio.sleep(1)
+        await asyncio.sleep(10)
         task.cancel()
 
         print(f"\n[websocket] Received {len(messages_received)} updates")
+        assert len(messages_received) > 0, "No websocket data received"
 
     except Exception as e:
         print(f"Error: {e}")
         import traceback
         traceback.print_exc()
+        raise
     finally:
         await adapter.close()
 
