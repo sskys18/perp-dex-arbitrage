@@ -4,11 +4,35 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
+    }
   }
 }
 
 provider "aws" {
   region = var.aws_region
+}
+
+resource "tls_private_key" "arbitrage" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "arbitrage" {
+  key_name   = "perp-dex-arbitrage"
+  public_key = tls_private_key.arbitrage.public_key_openssh
+}
+
+resource "local_file" "private_key" {
+  content         = tls_private_key.arbitrage.private_key_pem
+  filename        = "${path.module}/arbitrage.pem"
+  file_permission = "0400"
 }
 
 data "aws_ami" "amazon_linux" {
@@ -72,6 +96,7 @@ resource "aws_iam_instance_profile" "arbitrage" {
 resource "aws_instance" "arbitrage" {
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.instance_type
+  key_name               = aws_key_pair.arbitrage.key_name
   iam_instance_profile   = aws_iam_instance_profile.arbitrage.name
   vpc_security_group_ids = [aws_security_group.arbitrage.id]
 
