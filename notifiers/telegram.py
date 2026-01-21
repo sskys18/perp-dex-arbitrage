@@ -17,7 +17,7 @@ async def send_telegram_init(exchanges: list[str], symbols: list[str]) -> None:
     message = (
         f"🟢 *Arbitrage Bot Started*\n"
         f"Exchanges: {', '.join(exchanges)}\n"
-        f"Symbols: {len(symbols)} ({', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''})"
+        f"Symbols ({len(symbols)}): {', '.join(symbols)}"
     )
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
