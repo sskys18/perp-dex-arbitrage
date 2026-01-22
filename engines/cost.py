@@ -19,10 +19,23 @@ class CostEngine:
         self._fees = fee_rates
         # Funding rates: (exchange, symbol) -> rate
         self._funding: Dict[Tuple[str, str], Decimal] = {}
+        # Precomputed fee multipliers for hot path
+        self._sell_mult: Dict[str, Decimal] = {}
+        self._buy_mult: Dict[str, Decimal] = {}
+        self._precompute_multipliers()
+
+    def _precompute_multipliers(self) -> None:
+        """Precompute fee multipliers for all exchanges"""
+        for exchange, rates in self._fees.items():
+            self._sell_mult[exchange] = Decimal("1") - rates.taker_fee
+            self._buy_mult[exchange] = Decimal("1") + rates.taker_fee
 
     def update_fees(self, exchange: str, fee_rates: FeeRates) -> None:
         """Update fee rates for an exchange"""
         self._fees[exchange] = fee_rates
+        # Recompute multipliers for this exchange
+        self._sell_mult[exchange] = Decimal("1") - fee_rates.taker_fee
+        self._buy_mult[exchange] = Decimal("1") + fee_rates.taker_fee
 
     def update_funding(self, exchange: str, symbol: str, rate: Decimal) -> None:
         """Update funding rate for an exchange/symbol pair"""
@@ -53,9 +66,9 @@ class CostEngine:
 
         SellScore = price * (1 - taker_fee) - funding_cost
         """
-        fee = self.get_taker_fee(exchange)
-        funding = self.get_funding(exchange, symbol)
-        return price * (Decimal("1") - fee) - funding
+        mult = self._sell_mult.get(exchange, Decimal("0.9995"))  # Default 0.05% fee
+        funding = self._funding.get((exchange, symbol), Decimal("0"))
+        return price * mult - funding
 
     def compute_buy_score(self, price: Decimal, exchange: str, symbol: str) -> Decimal:
         """
@@ -64,6 +77,6 @@ class CostEngine:
 
         BuyScore = price * (1 + taker_fee) + funding_cost
         """
-        fee = self.get_taker_fee(exchange)
-        funding = self.get_funding(exchange, symbol)
-        return price * (Decimal("1") + fee) + funding
+        mult = self._buy_mult.get(exchange, Decimal("1.0005"))  # Default 0.05% fee
+        funding = self._funding.get((exchange, symbol), Decimal("0"))
+        return price * mult + funding

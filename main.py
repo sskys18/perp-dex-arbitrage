@@ -51,6 +51,16 @@ def create_adapters() -> List[BaseExchangeAdapter]:
     ]
 
 
+def logged_task(coro, name: str = ""):
+    """Create a task with error logging for fire-and-forget coroutines"""
+    async def wrapper():
+        try:
+            await coro
+        except Exception as e:
+            print(f"[TASK ERROR] {name}: {e}")
+    return asyncio.create_task(wrapper())
+
+
 async def print_signal(signal: Signal) -> None:
     """Print signal to console"""
     print(f"\n{'='*60}")
@@ -70,11 +80,12 @@ async def handle_signal(signal: Signal) -> None:
         await save_signal(signal)
     except Exception as e:
         print(f"  [DB Error] {e}")
-    try:
-        await send_telegram_signal(signal)
-    except Exception as e:
-        # Suppress Telegram rate limit errors (fire-and-forget pattern)
-        pass
+    # Only send Telegram for exceptional signals (>15 bps) to avoid rate limiting
+    if signal.edge_bps >= 15:
+        try:
+            await send_telegram_signal(signal)
+        except Exception:
+            pass
 
 
 async def monitor_loop(state_engine, cost_engine, config, interval: int = 10):
@@ -117,17 +128,20 @@ async def main():
     print("Perpetual DEX Arbitrage Signal Generator")
     print("=" * 50)
 
-    # 1. Fetch symbols from all exchanges
+    # 1. Fetch symbols from all exchanges (parallel)
     print("\n[1] Discovering symbols...")
-    exchange_symbols = {}
-    for adapter in adapters:
+
+    async def fetch_symbols(adapter):
         try:
             symbols = await adapter.list_symbols()
-            exchange_symbols[adapter.name] = set(symbols)
             print(f"  {adapter.name}: {len(symbols)} symbols - {symbols[:5]}...")
+            return adapter.name, set(symbols)
         except Exception as e:
             print(f"  {adapter.name}: FAILED - {e}")
-            exchange_symbols[adapter.name] = set()
+            return adapter.name, set()
+
+    results = await asyncio.gather(*[fetch_symbols(a) for a in adapters])
+    exchange_symbols = dict(results)
 
     # 2. Find common symbols (on 2+ exchanges)
     symbol_counts = Counter()
@@ -143,20 +157,24 @@ async def main():
         print("\nNo tradeable symbols found. Exiting.")
         return
 
-    # 3. Fetch fee rates
+    # 3. Fetch fee rates (parallel)
     print("\n[2] Loading fee rates...")
-    fees = {}
-    for adapter in adapters:
+
+    async def fetch_fees(adapter):
         try:
             fee_rates = await adapter.get_fee_rates()
-            fees[adapter.name] = fee_rates
             print(f"  {adapter.name}: maker={fee_rates.maker_fee*100:.3f}%, taker={fee_rates.taker_fee*100:.3f}%")
-        except Exception as e:
-            fees[adapter.name] = FeeRates(
+            return adapter.name, fee_rates
+        except Exception:
+            default_fees = FeeRates(
                 maker_fee=adapter.default_maker_fee,
                 taker_fee=adapter.default_taker_fee,
             )
             print(f"  {adapter.name}: using defaults (maker={adapter.default_maker_fee*100:.3f}%, taker={adapter.default_taker_fee*100:.3f}%)")
+            return adapter.name, default_fees
+
+    fee_results = await asyncio.gather(*[fetch_fees(a) for a in adapters])
+    fees = dict(fee_results)
 
     # 4. Initialize engines
     print("\n[3] Initializing engines...")

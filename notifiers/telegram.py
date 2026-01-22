@@ -8,10 +8,22 @@ from models import Signal
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Singleton bot instance
+_bot = None
+
+
+def _get_bot():
+    """Get or create singleton bot instance"""
+    global _bot
+    if _bot is None and TELEGRAM_BOT_TOKEN:
+        _bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    return _bot
+
 
 async def send_telegram_init(exchanges: list[str], symbols: list[str]) -> None:
     """Send init notification to Telegram"""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    bot = _get_bot()
+    if not bot or not TELEGRAM_CHAT_ID:
         return
 
     message = (
@@ -20,7 +32,6 @@ async def send_telegram_init(exchanges: list[str], symbols: list[str]) -> None:
         f"Symbols ({len(symbols)}): {', '.join(symbols)}"
     )
 
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
     await bot.send_message(
         chat_id=TELEGRAM_CHAT_ID,
         text=message,
@@ -30,7 +41,8 @@ async def send_telegram_init(exchanges: list[str], symbols: list[str]) -> None:
 
 async def send_telegram_signal(signal: Signal) -> None:
     """Send signal notification to Telegram"""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    bot = _get_bot()
+    if not bot or not TELEGRAM_CHAT_ID:
         return
 
     message = (
@@ -40,7 +52,6 @@ async def send_telegram_signal(signal: Signal) -> None:
         f"Edge: {signal.edge_absolute:.4f} USD ({signal.edge_bps:.2f} bps)"
     )
 
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
     await bot.send_message(
         chat_id=TELEGRAM_CHAT_ID,
         text=message,

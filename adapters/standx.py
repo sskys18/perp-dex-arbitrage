@@ -140,19 +140,17 @@ class StandxAdapter(BaseExchangeAdapter):
             await self._on_update(update)
 
         from exchanges.standx.perp import StandXMarketWsClient
+        import asyncio
         self.ws = StandXMarketWsClient(on_message=handle_message)
 
-        async def subscribe_after_connect():
-            await asyncio.sleep(1)  # Wait for connection
-            exc_syms = [self._symbol_map.get(sym, sym) for sym in symbols]
-            await self.ws.subscribe_depth_book(exc_syms)
-
-        import asyncio
-        # Run connect and subscription in parallel, don't block
-        await asyncio.gather(
-            self.ws.connect(),
-            subscribe_after_connect()
-        )
+        # Start connect in background, wait for ready, then subscribe
+        asyncio.create_task(self.ws.connect())
+        for _ in range(50):  # 5 second timeout
+            if self.ws.ws is not None:
+                break
+            await asyncio.sleep(0.1)
+        exc_syms = [self._symbol_map.get(sym, sym) for sym in symbols]
+        await self.ws.subscribe_depth_book(exc_syms)
 
     async def close(self) -> None:
         """Close all connections"""

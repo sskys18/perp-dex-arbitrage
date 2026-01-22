@@ -176,17 +176,17 @@ class NadoAdapter(BaseExchangeAdapter):
 
         self.ws = NadoPerpWsClient(on_message=handle_message)
 
-        async def on_connect():
-            for sym in symbols:
-                product_id = self._product_id_map.get(sym)
-                if product_id:
-                    await self.ws.subscribe_best_bid_offer(product_id)
-
+        # Start connect in background, wait for ready, then subscribe
         import asyncio
-        connect_task = asyncio.create_task(self.ws.connect())
-        await asyncio.sleep(1)
-        await on_connect()
-        await connect_task
+        asyncio.create_task(self.ws.connect())
+        for _ in range(50):  # 5 second timeout
+            if self.ws.ws is not None:
+                break
+            await asyncio.sleep(0.1)
+        for sym in symbols:
+            product_id = self._product_id_map.get(sym)
+            if product_id:
+                await self.ws.subscribe_best_bid_offer(product_id)
 
     async def close(self) -> None:
         """Close all connections"""

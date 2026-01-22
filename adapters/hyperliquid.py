@@ -128,18 +128,17 @@ class HyperliquidAdapter(BaseExchangeAdapter):
 
         self.ws = HyperliquidPerpWsClient(on_message=handle_message)
 
-        # Subscribe after connection
-        async def on_connect():
-            for sym in symbols:
-                exc_sym = self._symbol_map.get(sym, sym)
-                await self.ws.subscribe_l2_book(exc_sym)
-
-        # Connect and subscribe
+        # Start connect in background, wait for ready, then subscribe
         import asyncio
-        connect_task = asyncio.create_task(self.ws.connect())
-        await asyncio.sleep(1)  # Wait for connection
-        await on_connect()
-        await connect_task
+        asyncio.create_task(self.ws.connect())
+        # Wait for connection to establish (check ws.ws is set)
+        for _ in range(50):  # 5 second timeout
+            if self.ws.ws is not None:
+                break
+            await asyncio.sleep(0.1)
+        for sym in symbols:
+            exc_sym = self._symbol_map.get(sym, sym)
+            await self.ws.subscribe_l2_book(exc_sym)
 
     async def close(self) -> None:
         """Close all connections"""

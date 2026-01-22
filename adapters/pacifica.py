@@ -147,15 +147,15 @@ class PacificaAdapter(BaseExchangeAdapter):
 
         self.ws = PacificaPerpWsClient(on_message=handle_message)
 
-        async def on_connect():
-            for sym in symbols:
-                await self.ws.subscribe_bbo(sym)
-
+        # Start connect in background, wait for ready, then subscribe
         import asyncio
-        connect_task = asyncio.create_task(self.ws.connect())
-        await asyncio.sleep(1)
-        await on_connect()
-        await connect_task
+        asyncio.create_task(self.ws.connect())
+        for _ in range(50):  # 5 second timeout
+            if self.ws.ws is not None:
+                break
+            await asyncio.sleep(0.1)
+        for sym in symbols:
+            await self.ws.subscribe_bbo(sym)
 
     async def close(self) -> None:
         """Close all connections"""

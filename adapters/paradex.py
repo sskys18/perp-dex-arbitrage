@@ -139,17 +139,16 @@ class ParadexAdapter(BaseExchangeAdapter):
 
         self.ws = ParadexPerpWsClient(on_message=handle_message)
 
-        # Subscribe after connection
-        async def on_connect():
-            for sym in symbols:
-                exc_sym = self._symbol_map.get(sym, sym)
-                await self.ws.subscribe_bbo(exc_sym)
-
+        # Start connect in background, wait for ready, then subscribe
         import asyncio
-        connect_task = asyncio.create_task(self.ws.connect())
-        await asyncio.sleep(1)
-        await on_connect()
-        await connect_task
+        asyncio.create_task(self.ws.connect())
+        for _ in range(50):  # 5 second timeout
+            if self.ws.ws is not None:
+                break
+            await asyncio.sleep(0.1)
+        for sym in symbols:
+            exc_sym = self._symbol_map.get(sym, sym)
+            await self.ws.subscribe_bbo(exc_sym)
 
     async def close(self) -> None:
         """Close all connections"""

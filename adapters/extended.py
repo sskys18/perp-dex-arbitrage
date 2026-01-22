@@ -12,6 +12,10 @@ from models import SymbolInfo, FundingRate, FeeRates, MarketUpdate, PriceLevel
 from .base import BaseExchangeAdapter
 
 
+# Limit Extended to top 5 high-volume symbols (creates 1 WS per symbol)
+EXTENDED_HIGH_VOLUME_SYMBOLS = {"BTC", "ETH", "SOL", "XRP", "DOGE"}
+
+
 class ExtendedAdapter(BaseExchangeAdapter):
     """Extended perpetual exchange adapter"""
 
@@ -134,9 +138,14 @@ class ExtendedAdapter(BaseExchangeAdapter):
             return handle_message
 
         # Extended uses URL-based streaming - create one WS per symbol
+        # Limit to high-volume symbols to reduce connection count
         import asyncio
+        filtered_symbols = [s for s in symbols if s in EXTENDED_HIGH_VOLUME_SYMBOLS]
+        if not filtered_symbols:
+            filtered_symbols = symbols[:5]  # Fallback to first 5 if no matches
+
         tasks = []
-        for symbol in symbols:
+        for symbol in filtered_symbols:
             exc_sym = self._symbol_map.get(symbol, f"{symbol}-USD")
             ws_url = f"{WS_URL}/orderbooks/{exc_sym}?depth=1"
             ws = WsClient(url=ws_url, on_message=make_handler(symbol))

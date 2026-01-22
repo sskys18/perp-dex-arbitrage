@@ -173,5 +173,14 @@ class ArbitrageEngine:
 
         # Set cooldown and emit (fire-and-forget to not block hot path)
         self._set_cooldown(symbol)
-        asyncio.create_task(self.on_signal(signal))
+        self._emit_signal(signal)
         return signal
+
+    def _emit_signal(self, signal: Signal) -> None:
+        """Emit signal with error logging"""
+        async def _run():
+            try:
+                await self.on_signal(signal)
+            except Exception as e:
+                print(f"[SIGNAL ERROR] {signal.symbol}: {e}")
+        asyncio.create_task(_run())
